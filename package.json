@@ -1,0 +1,15 @@
+{
+  "name": "jwtAuth",
+  "version": "1.0.0",
+  "main": "jwtauth.js",
+  "type": "module",
+  "scripts": {
+    "start": "node jwtauth.js"
+  },
+  "dependencies": {
+    "openpgp": "^5.3.0",
+    "node-fetch": "^3.0.0",
+    "uuid": "^8.3.2"
+  }
+}
+
