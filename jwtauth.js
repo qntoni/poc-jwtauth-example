@@ -80,45 +80,78 @@ function createLoginChallenge() {
     });
 }
 
-// Function to handle the login process by sending the encrypted challenge to the server's JWT login endpoint
+// Function to decrypt the server challenge and extract the JWT token
+async function decryptServerChallenge(encryptedChallenge, passphrase) {
+    try {
+        const readMessage = await openpgp.readMessage({
+            armoredMessage: encryptedChallenge // The PGP message returned by the server
+        });
+
+        // Read the private key
+        const armoredPrivateKey = fs.readFileSync(config.privateKeyPath, 'utf8');
+        const privateKey = await openpgp.readPrivateKey({ armoredKey: armoredPrivateKey });
+
+        // Decrypt the private key using the passphrase
+        const decryptedPrivateKey = await openpgp.decryptKey({
+            privateKey: privateKey,
+            passphrase: passphrase
+        });
+
+        // Decrypt the message using the private key
+        const { data: decryptedData } = await openpgp.decrypt({
+            message: readMessage,
+            decryptionKeys: decryptedPrivateKey
+        });
+
+        console.log('Decrypted server challenge:', decryptedData);
+        return JSON.parse(decryptedData); // Return the decrypted data as JSON
+    } catch (error) {
+        console.error('Decryption error:', error);
+        throw new Error('Failed to decrypt the server challenge.');
+    }
+}
+
+// Function to handle JWT login and decryption
 async function login(passphrase) {
     try {
         console.log('Performing JWT login...');
-
-        // Create the login challenge that will be encrypted and sent to the server
         const challenge = createLoginChallenge();
-
-        // Encrypt the challenge using the server's public key and user's private key
         const encryptedChallenge = await encryptMessage(challenge, passphrase);
         console.log(`Encrypted challenge: ${encryptedChallenge}`);
 
-        // Make a POST request to the JWT login endpoint with the encrypted challenge
         const response = await fetch(`${config.serverUrl}${config.URL_LOGIN}`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json', // Indicate that we're sending JSON
+                'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                user_id: config.userId,             // Pass the user's ID
-                challenge: encryptedChallenge       // Include the encrypted challenge
-            }),
-            agent: httpsAgent // Use the custom https agent that allows self-signed certificates
+            body: JSON.stringify({ user_id: config.userId, challenge: encryptedChallenge }),
+            agent: httpsAgent
         });
 
-        // Parse the server's response
         const result = await response.json();
         console.log(`Login response status: ${response.status}`);
         console.log(`Login response body: ${JSON.stringify(result)}`);
 
-        // Check if the login was successful
         if (response.status === 200) {
             console.log('JWT login successful.');
-            return result;  // Return the result if successful
+
+            // Decrypt the challenge returned by the server
+            const decryptedChallenge = await decryptServerChallenge(result.body.challenge, passphrase);
+
+            console.log('Decrypted challenge:', decryptedChallenge);
+
+            // Extract the JWT token (usually an `access_token` and/or `refresh_token`)
+            const accessToken = decryptedChallenge.access_token;
+            const refreshToken = decryptedChallenge.refresh_token;
+
+            console.log('Access Token:', accessToken);
+            console.log('Refresh Token:', refreshToken);
+
+            return { accessToken, refreshToken };
         } else {
-            throw new Error(`Login failed: ${result.message}`);  // Throw an error if login failed
+            throw new Error(`Login failed: ${result.message}`);
         }
     } catch (error) {
-        // Handle errors during the login process
         console.error(`Error during login: ${error.message}`);
         throw error;
     }
